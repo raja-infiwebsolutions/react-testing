@@ -1,1 +1,1648 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contacts · iCertify</title>
+
+  <link rel="icon" href="assets/brand/favicon.ico">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- ============================================================
+       WeWeb consultant notes (delete before production):
+
+       URL: portal.pbc.au/contacts
+
+       PURPOSE
+         Master directory across all projects. Distinct from the
+         project-scoped Project Detail > Contacts tab. This page
+         is the canonical entry point for managing contacts,
+         companies, internal staff, and portal user accounts.
+
+       FOUR TABS — DATA SOURCES
+         1. Clients
+            - View: v_clients
+            - Source: public.contacts filtered to those linked via
+              project_contacts with stakeholder_category = client_owner,
+              UNION contacts holding a portal user record with role=client
+            - Returns: contact_id, full_name, position, company_id,
+              company_name, email, phone, mobile, portal_user_status,
+              active_projects_count, last_contacted_at
+
+         2. Companies
+            - View: v_companies
+            - Source: public.companies with aggregations
+            - Returns: company_id, company_name, abn, company_type_code
+              (FK to public.company_types.type_code), company_type_label
+              (joined from company_types.display_label), company_type_badge
+              (joined from company_types.badge_colour), status (active |
+              archived | merged), activity_state (active | dormant —
+              derived: dormant = no project activity in 12 months),
+              is_debtor (boolean — derived: debtor_projects_count > 0),
+              contacts_count, active_projects_count, debtor_projects_count,
+              last_activity_at
+            - company_type is a LOOKUP not an enum (per CN-2026-002).
+              New types added via Settings › Company types admin page.
+              No code or migration required to add new types.
+            - builder = head contractor / construction company. contractor
+              = subbies and trade contractors (electrical, structural
+              steel, AV/security, scaffolding). Additional types can be
+              added through the admin UI as needed (e.g. solar installer,
+              hydraulic contractor, ESD consultant).
+
+         3. Staff
+            - View: v_staff
+            - Source: public.staff joined to public.users
+            - Returns: staff_id, full_name, title (free text, display only),
+              role (LOCKED ENUM: Director | Certifier | Surveyor |
+              Engineer | Inspector | Manager | Admin — drives portal
+              permissions, capacity reports, and signing authority),
+              registrations (jsonb array of {type, number, jurisdiction}),
+              office, email, phone, status (active | leave | inactive),
+              project_allocations_count
+            - Registrations stored as jsonb — supports multiple per
+              staff member (Duncan: NT 19209BU + NT 19209ES)
+            - title is cosmetic only (e.g. "Senior Building Certifier")
+              and does NOT control any permission. All permission logic
+              keys off role.
+
+         4. All Portal Users
+            - View: v_portal_users
+            - Source: public.users joined to auth.users
+            - Returns: user_id, full_name, role enum (admin | manager |
+              staff | client | consultant), linked_entity_type (staff |
+              contact), linked_entity_id, email, status (active | invited
+              | disabled | suspended), last_sign_in_at, mfa_enabled
+
+       CROSS-TAB PIVOTS
+         - Clients tab → click company name → opens Companies tab
+           filtered to that company_id
+         - Companies tab → click contacts count → opens Clients tab
+           filtered to that company_id
+         - Companies tab → click projects count → opens Projects list
+           filtered to that company_id
+         - Portal Users tab → click linked entity → opens corresponding
+           tab (Staff or Clients) and scrolls/highlights the row
+
+       ROLE GATES
+         Clients tab:
+           - View       — any staff
+           - Add        — Admin, Manager
+           - Edit       — Admin, Manager
+           - Archive    — Admin only (soft delete)
+         Companies tab:
+           - View       — any staff
+           - Add        — Admin, Manager
+           - Edit       — Admin, Manager
+           - Merge      — Admin only (when duplicates detected)
+         Staff tab:
+           - View       — any staff
+           - Add/Edit   — Admin only (creates auth.users + staff +
+                          public.users in transaction)
+           - Status change — Admin only
+         All Portal Users tab:
+           - View       — Admin, Manager
+           - Invite     — Admin, Manager
+           - Disable    — Admin only
+           - Reset MFA  — Admin only
+
+       BULK ACTIONS
+         Export   — all tabs, ADMIN ONLY
+                    Default format XLSX (preserves ABN leading zeros
+                    and date formatting). CSV available via dropdown.
+                    Every export writes an audit row: user_id, tab,
+                    filter state, format, row count, timestamp.
+         Bulk email and bulk portal invite are NOT supported. Clients are
+         invited individually at the point of creation. Bulk delete is
+         NOT supported on any tab — contacts may carry audit-relevant
+         history.
+
+       SEARCH
+         Each tab has its own search input scoped to that tab's data.
+         The global top-bar search covers all tabs simultaneously and
+         deep-links to the matching row.
+
+       PAGE PROTECTION
+         Staff-only page. Clients access their own contact details via
+         a different "My profile" page on the client side; the master
+         directory is not exposed to clients.
+       ============================================================ -->
+
+  <style type="text/tailwindcss">
+    @theme {
+      --color-primary-100: #E8EBF2;
+      --color-primary-500: #071D49;
+      --color-primary-700: #1A3A7A;
+      --color-primary-900: #040F26;
+
+      --color-neutral-100: #F8F9FA;
+      --color-neutral-200: #E9ECEF;
+      --color-neutral-300: #DEE2E6;
+      --color-neutral-500: #ADB5BD;
+      --color-neutral-600: #6C757D;
+      --color-neutral-700: #495057;
+      --color-neutral-800: #343A40;
+
+      --color-success: #1A7A4A;
+      --color-success-light: #D4EDDA;
+      --color-warning: #B45309;
+      --color-warning-light: #FFF3CD;
+      --color-danger: #B91C1C;
+      --color-danger-light: #F8D7DA;
+      --color-info: #1D4ED8;
+      --color-info-light: #DBEAFE;
+      --color-pending: #C2410C;
+      --color-pending-light: #FFEDD5;
+    }
+
+    body {
+      font-family: "Inter", system-ui, sans-serif;
+      color: var(--color-neutral-800);
+      background: var(--color-neutral-100);
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "tnum";
+    }
+
+    @layer components {
+      .btn {
+        @apply inline-flex items-center justify-center gap-2 font-medium text-[13px] leading-none
+               px-4 py-2 rounded-[6px] transition-colors duration-150
+               focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2;
+      }
+      .btn-primary    { @apply bg-primary-500 text-white hover:bg-primary-700 active:bg-primary-900; }
+      .btn-secondary  { @apply bg-white text-primary-500 border border-primary-500 hover:bg-primary-100; }
+      .btn-ghost      { @apply bg-transparent text-neutral-600 hover:bg-neutral-100 hover:text-neutral-800; }
+
+      .badge {
+        @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] text-[10px] font-semibold leading-tight whitespace-nowrap uppercase tracking-wider;
+      }
+
+      /* Portal status */
+      .badge-portal-active  { @apply bg-success-light text-success; }
+      .badge-portal-invited { @apply bg-warning-light text-warning; }
+      .badge-portal-none    { @apply bg-neutral-100 text-neutral-500; }
+
+      /* Company type */
+      .badge-comp-client       { @apply bg-primary-100 text-primary-500; }
+      .badge-comp-builder      { @apply bg-pending-light text-pending; }
+      .badge-comp-design       { @apply bg-info-light text-info; }
+      .badge-comp-consultancy  { @apply bg-warning-light text-warning; }
+      .badge-comp-authority    { @apply bg-neutral-200 text-neutral-700; }
+      .badge-comp-contractor   { @apply bg-success-light text-success; }
+
+      /* Role badge */
+      .badge-role-admin      { @apply bg-danger-light text-danger; }
+      .badge-role-manager    { @apply bg-warning-light text-warning; }
+      .badge-role-staff      { @apply bg-info-light text-info; }
+      .badge-role-client     { @apply bg-primary-100 text-primary-500; }
+      .badge-role-consultant { @apply bg-success-light text-success; }
+
+      /* User status */
+      .badge-user-active     { @apply bg-success-light text-success; }
+      .badge-user-invited    { @apply bg-warning-light text-warning; }
+      .badge-user-disabled   { @apply bg-neutral-200 text-neutral-600; }
+      .badge-user-suspended  { @apply bg-danger-light text-danger; }
+
+      /* Staff status */
+      .badge-staff-active   { @apply bg-success-light text-success; }
+      .badge-staff-leave    { @apply bg-warning-light text-warning; }
+      .badge-staff-inactive { @apply bg-neutral-200 text-neutral-600; }
+
+      /* Sidebar nav */
+      .nav-item {
+        @apply flex items-center gap-3 px-5 py-2.5 text-[13px] text-white/70 hover:bg-white/5 hover:text-white
+               transition-colors duration-100 border-l-[3px] border-transparent -ml-[3px];
+      }
+      .nav-item-active {
+        @apply text-white bg-white/[0.06] border-white font-medium;
+      }
+      .nav-section-label {
+        @apply px-5 py-2 text-[10px] uppercase tracking-[0.16em] text-white/40 font-semibold;
+      }
+
+      /* Page tab nav (top-level for this page) */
+      .ptab-link {
+        @apply px-4 py-3 text-[13px] text-neutral-600 hover:text-neutral-800 border-b-2 border-transparent
+               whitespace-nowrap transition-colors duration-100 inline-flex items-center gap-2 cursor-pointer;
+      }
+      .ptab-link-active {
+        @apply text-primary-500 border-primary-500 font-semibold;
+      }
+      .ptab-count {
+        @apply text-[11px] bg-neutral-200 text-neutral-700 px-1.5 py-0.5 rounded font-medium;
+      }
+      .ptab-link-active .ptab-count {
+        @apply bg-primary-100 text-primary-500;
+      }
+
+      .card {
+        @apply bg-white border border-neutral-200 rounded-[8px] shadow-[0_1px_3px_rgba(0,0,0,0.04)];
+      }
+
+      /* Data tables (shared across tabs) */
+      .dir-table { @apply w-full text-[13px] text-neutral-800; }
+      .dir-table thead th {
+        @apply text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-500
+               bg-neutral-100 border-b border-neutral-200;
+      }
+      .dir-table thead th.text-right { @apply text-right; }
+      .dir-table tbody td {
+        @apply px-3 py-3 border-b border-neutral-200 align-middle;
+      }
+      .dir-table tbody td.text-right { @apply text-right; }
+      .dir-table tbody tr {
+        @apply hover:bg-neutral-100 transition-colors duration-100 cursor-pointer;
+      }
+      .dir-table tbody tr:last-child td {
+        @apply border-b-0;
+      }
+
+      /* Contact avatar (Clients) */
+      .ent-avatar {
+        @apply w-8 h-8 rounded-full bg-primary-100 text-primary-500 flex items-center justify-center
+               text-[11px] font-semibold flex-shrink-0;
+      }
+      /* Company avatar (Companies) */
+      .ent-avatar-company {
+        @apply w-8 h-8 rounded bg-neutral-100 text-neutral-700 flex items-center justify-center
+               text-[11px] font-semibold flex-shrink-0 border border-neutral-200;
+      }
+      /* Staff avatar (Staff) — distinct from Clients */
+      .ent-avatar-staff {
+        @apply w-8 h-8 rounded-full bg-primary-500 text-white flex items-center justify-center
+               text-[11px] font-semibold flex-shrink-0;
+      }
+
+      /* Staff role badge (enum: drives portal permissions) */
+      .badge-staff-role-director   { @apply bg-primary-100 text-primary-500; }
+      .badge-staff-role-certifier  { @apply bg-info-light text-info; }
+      .badge-staff-role-surveyor   { @apply bg-info-light text-info; }
+      .badge-staff-role-engineer   { @apply bg-success-light text-success; }
+      .badge-staff-role-inspector  { @apply bg-pending-light text-pending; }
+      .badge-staff-role-manager    { @apply bg-warning-light text-warning; }
+      .badge-staff-role-admin      { @apply bg-neutral-200 text-neutral-700; }
+
+      /* MFA plain text (replaces badge — less visually competitive with Status) */
+      .mfa-on    { @apply text-[12px] font-medium text-success; }
+      .mfa-off   { @apply text-[12px] font-medium text-neutral-500; }
+      .mfa-none  { @apply text-[12px] text-neutral-400; }
+
+      /* Inline link */
+      .pivot-link {
+        @apply text-primary-500 hover:underline cursor-pointer;
+      }
+
+      /* Filter chip */
+      .chip {
+        @apply inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-medium
+               bg-white border border-neutral-300 text-neutral-700 rounded-[20px]
+               hover:border-neutral-500 transition-colors cursor-pointer;
+      }
+      .chip-active {
+        @apply bg-primary-100 text-primary-500 border-primary-500;
+      }
+
+      /* Icon button */
+      .icon-btn {
+        @apply inline-flex items-center justify-center w-7 h-7 rounded-[4px] text-neutral-500
+               hover:bg-neutral-200 hover:text-neutral-800 transition-colors;
+      }
+
+      /* Registration pill */
+      .reg-pill {
+        @apply inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold
+               bg-primary-100 text-primary-500;
+      }
+
+      /* Linked entity small chip (portal users tab) */
+      .link-small {
+        @apply inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium
+               bg-neutral-100 text-neutral-700 hover:bg-primary-100 hover:text-primary-500 transition-colors cursor-pointer;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="flex min-h-screen">
+
+  <!-- =========================================================
+       SIDEBAR — Contacts active here, not Projects
+       ========================================================= -->
+  <aside class="w-60 bg-primary-500 text-white flex flex-col fixed inset-y-0 left-0">
+    <div class="px-5 py-5 border-b border-white/10">
+      <img src="assets/brand/pbc-logo-white.svg" alt="Project Building Certifiers" class="h-7 mb-2.5">
+      <div class="text-[15px] font-semibold tracking-tight leading-none">iCertify</div>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto py-3">
+      <div class="nav-section-label">Work</div>
+      <a href="staff-dashboard.html" class="nav-item">
+        <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+        Dashboard
+      </a>
+      <a href="projects-list.html" class="nav-item">
+        <i data-lucide="folder-kanban" class="w-4 h-4"></i>
+        <span class="flex-1">Projects</span>
+        <span class="text-[11px] bg-white/10 px-1.5 py-0.5 rounded text-white/80">42</span>
+      </a>
+      <a href="#" class="nav-item">
+        <i data-lucide="calendar-check" class="w-4 h-4"></i>
+        <span class="flex-1">Inspections</span>
+        <span class="text-[11px] bg-pending/80 px-1.5 py-0.5 rounded">3</span>
+      </a>
+      <a href="#" class="nav-item nav-item-active">
+        <i data-lucide="users" class="w-4 h-4"></i>
+        Contacts
+      </a>
+
+      <div class="nav-section-label mt-4">Compliance</div>
+      <a href="document-register.html" class="nav-item">
+        <i data-lucide="file-text" class="w-4 h-4"></i>
+        Document Register
+      </a>
+
+      <div class="nav-section-label mt-4">Operations</div>
+      <a href="#" class="nav-item">
+        <i data-lucide="clock" class="w-4 h-4"></i>
+        Timesheets
+      </a>
+      <a href="#" class="nav-item">
+        <i data-lucide="mail-question" class="w-4 h-4"></i>
+        <span class="flex-1">Submissions</span>
+        <span class="text-[11px] bg-pending/80 px-1.5 py-0.5 rounded">2</span>
+      </a>
+
+      <div class="nav-section-label mt-4">Admin</div>
+      <a href="#" class="nav-item"><i data-lucide="user-cog" class="w-4 h-4"></i>Users</a>
+      <a href="#" class="nav-item"><i data-lucide="briefcase" class="w-4 h-4"></i>Services</a>
+      <a href="#" class="nav-item"><i data-lucide="check-square" class="w-4 h-4"></i>Checksheet Templates</a>
+    </nav>
+
+    <div class="border-t border-white/10 px-5 py-4">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-[11px] font-semibold text-white">DC</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[13px] font-medium text-white truncate">Duncan Cooke</div>
+          <div class="text-[10px] text-white/50 font-mono uppercase tracking-wider">19209BU · Admin</div>
+        </div>
+        <button class="text-white/50 hover:text-white" aria-label="Sign out"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- =========================================================
+       MAIN
+       ========================================================= -->
+  <main class="flex-1 ml-60 pb-24">
+
+    <!-- Top bar -->
+    <header class="bg-white border-b border-neutral-200 px-8 py-3 flex items-center gap-4 sticky top-0 z-30">
+      <div class="relative flex-1 max-w-md">
+        <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"></i>
+        <input type="text" aria-label="Global search" placeholder="Search projects, contacts, documents…"
+          class="w-full pl-9 pr-3 py-2 text-[13px] bg-neutral-100 border border-neutral-200 rounded-[6px] placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 focus:bg-white focus:ring-2 focus:ring-primary-500/15">
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <button class="btn btn-ghost relative p-2" aria-label="Notifications"><i data-lucide="bell" class="w-4 h-4"></i><span class="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-danger rounded-full"></span></button>
+        <!-- WEWEB: v-if currentUser.role in ['admin','manager','staff'] -->
+        <button class="btn btn-primary" aria-label="Create new project"><i data-lucide="plus" class="w-4 h-4"></i>New project</button>
+      </div>
+    </header>
+
+    <!-- Page header -->
+    <div class="bg-white border-b border-neutral-200 px-8 pt-6">
+      <div class="flex items-start justify-between gap-4 flex-wrap mb-5">
+        <div class="min-w-0">
+          <h1 class="text-[24px] font-bold text-neutral-800 leading-tight mb-1">Contacts</h1>
+          <p class="text-[13px] text-neutral-600">Master directory of people, companies, staff, and portal accounts across all projects.</p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <!-- WEWEB: v-if currentUser.role === 'admin' (Export restricted to admins only) -->
+          <div class="relative" id="export-wrapper">
+            <div class="inline-flex rounded-[6px] overflow-hidden border border-neutral-300">
+              <button
+                id="export-primary-btn"
+                class="btn btn-ghost px-2.5 rounded-none border-0"
+                aria-label="Export current tab as XLSX"
+                onclick="exportCurrentTab('xlsx')">
+                <i data-lucide="download" class="w-4 h-4"></i>Export
+              </button>
+              <button
+                id="export-menu-btn"
+                class="btn btn-ghost px-1.5 rounded-none border-0 border-l border-neutral-300"
+                aria-label="Export options"
+                aria-haspopup="true"
+                aria-expanded="false"
+                onclick="toggleExportMenu(event)">
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <div
+              id="export-menu"
+              class="hidden absolute right-0 mt-1 w-48 bg-white border border-neutral-200 rounded-[6px] shadow-lg z-40"
+              role="menu"
+              aria-label="Export format options">
+              <button
+                class="w-full text-left px-3 py-2 text-[12px] hover:bg-neutral-100 flex items-center gap-2"
+                role="menuitem"
+                onclick="exportCurrentTab('xlsx')">
+                <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5 text-success"></i>
+                <div>
+                  <div class="font-medium">Excel (.xlsx)</div>
+                  <div class="text-[10px] text-neutral-500">Preserves ABN, dates</div>
+                </div>
+              </button>
+              <button
+                class="w-full text-left px-3 py-2 text-[12px] hover:bg-neutral-100 flex items-center gap-2 border-t border-neutral-200"
+                role="menuitem"
+                onclick="exportCurrentTab('csv')">
+                <i data-lucide="file-text" class="w-3.5 h-3.5 text-neutral-600"></i>
+                <div>
+                  <div class="font-medium">CSV (.csv)</div>
+                  <div class="text-[10px] text-neutral-500">Universal, plain text</div>
+                </div>
+              </button>
+            </div>
+          </div>
+          <!-- WEWEB: v-if currentUser.role in ['admin','manager']  (Staff tab → admin only; toggle in switchTab) -->
+          <button id="primary-add-btn" class="btn btn-primary" aria-label="Add new record">
+            <i data-lucide="user-plus" class="w-4 h-4"></i>
+            <span id="primary-add-label">Add client</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab nav -->
+      <div class="flex items-center gap-1">
+        <a class="ptab-link ptab-link-active" data-tab="clients" onclick="switchTab(this, 'clients', 'Add client', 'user-plus')">
+          <i data-lucide="briefcase" class="w-4 h-4"></i>
+          Clients
+          <span class="ptab-count">87</span>
+        </a>
+        <a class="ptab-link" data-tab="companies" onclick="switchTab(this, 'companies', 'Add company', 'building')">
+          <i data-lucide="building" class="w-4 h-4"></i>
+          Companies
+          <span class="ptab-count">52</span>
+        </a>
+        <a class="ptab-link" data-tab="staff" onclick="switchTab(this, 'staff', 'Add staff', 'user-cog')">
+          <i data-lucide="user-cog" class="w-4 h-4"></i>
+          Staff
+          <span class="ptab-count">6</span>
+        </a>
+        <a class="ptab-link" data-tab="users" onclick="switchTab(this, 'users', 'Invite portal user', 'key')">
+          <i data-lucide="key" class="w-4 h-4"></i>
+          All portal users
+          <span class="ptab-count">94</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- =========================================================
+         CONTENT
+         ========================================================= -->
+    <div class="px-8 py-6 max-w-[1600px]">
+
+      <!-- ===============================================
+           TAB 1 — CLIENTS
+           =============================================== -->
+      <section id="tab-clients" class="tab-pane">
+
+        <!-- Toolbar -->
+        <div class="card mb-4">
+          <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+            <div class="relative flex-1 max-w-sm min-w-[200px]">
+              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"></i>
+              <input type="text" aria-label="Search clients" placeholder="Search clients…"
+                class="w-full pl-8 pr-3 py-1.5 text-[12px] bg-neutral-100 border border-neutral-200 rounded-[6px] placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 focus:bg-white">
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Portal</span>
+              <button class="chip chip-active">Any</button>
+              <button class="chip">Active</button>
+              <button class="chip">Invited</button>
+              <button class="chip">None</button>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="card overflow-x-auto">
+          <table class="dir-table">
+            <thead>
+              <tr>
+                <th class="w-[260px]">Name</th>
+                <th>Company &amp; position</th>
+                <th class="w-[160px]">Phone</th>
+                <th class="w-[200px]">Email</th>
+                <th class="w-[110px]">Portal</th>
+                <th class="w-[110px] text-right">Projects</th>
+                <th class="w-[110px]">Last contact</th>
+                <th class="w-[80px]"></th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <tr onclick="openContact('CT-1042')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">MG</div>
+                    <div class="font-semibold text-[13px]">Mark Glenister</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link" onclick="event.stopPropagation(); pivotToCompany('CO-1042')">Glenelg Developments Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">Director</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 412 484 921</td>
+                <td class="text-[12px] text-neutral-700 truncate">mark@glenelgdev.com.au</td>
+                <td><span class="badge badge-portal-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link" onclick="event.stopPropagation();">3</span></td>
+                <td class="text-[12px] text-neutral-600">Today</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1058')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">SP</div>
+                    <div class="font-semibold text-[13px]">Sarah Pham</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Glenelg Developments Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">Project Manager</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 458 112 003</td>
+                <td class="text-[12px] text-neutral-700 truncate">sarah.pham@glenelgdev.com.au</td>
+                <td><span class="badge badge-portal-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">3</span></td>
+                <td class="text-[12px] text-neutral-600">Yesterday</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1112')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">LM</div>
+                    <div class="font-semibold text-[13px]">Lisa Macready</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Macready Constructions Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">General Manager</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 411 882 040</td>
+                <td class="text-[12px] text-neutral-700 truncate">lisa@macreadyconst.com.au</td>
+                <td><span class="badge badge-portal-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">5</span></td>
+                <td class="text-[12px] text-neutral-600">2 days ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1218')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">AV</div>
+                    <div class="font-semibold text-[13px]">Anna Voss</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Voss Developments Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">Director</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 419 442 081</td>
+                <td class="text-[12px] text-neutral-700 truncate">anna@vossdev.com.au</td>
+                <td><span class="badge badge-portal-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">2</span></td>
+                <td class="text-[12px] text-neutral-600">5 days ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1334')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">NC</div>
+                    <div class="font-semibold text-[13px]">Nina Chambers</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Coastal Living Group Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">Director</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 432 008 711</td>
+                <td class="text-[12px] text-neutral-700 truncate">nina@coastalliving.com.au</td>
+                <td><span class="badge badge-portal-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">1</span></td>
+                <td class="text-[12px] text-neutral-600">1 week ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1408')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">PK</div>
+                    <div class="font-semibold text-[13px]">Peter Kapeli</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Kapeli Properties Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">Owner</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 478 199 332</td>
+                <td class="text-[12px] text-neutral-700 truncate">peter@kapeli.com.au</td>
+                <td><span class="badge badge-portal-invited"><i data-lucide="mail" class="w-2.5 h-2.5"></i> Invited</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">1</span></td>
+                <td class="text-[12px] text-neutral-600">10 days ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1512')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">RT</div>
+                    <div class="font-semibold text-[13px]">Robert Tan</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Tan Holdings Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">Director</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 416 559 220</td>
+                <td class="text-[12px] text-neutral-700 truncate">rtan@tanholdings.com.au</td>
+                <td><span class="badge badge-portal-none"><i data-lucide="minus-circle" class="w-2.5 h-2.5"></i> None</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">2</span></td>
+                <td class="text-[12px] text-neutral-600">3 weeks ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1645')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">BC</div>
+                    <div class="font-semibold text-[13px]">Ben Carter</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Carter &amp; Co Builders</span></div>
+                  <div class="text-[11px] text-neutral-500">Owner</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 401 887 553</td>
+                <td class="text-[12px] text-neutral-700 truncate">ben@cartercobuilders.com.au</td>
+                <td><span class="badge badge-portal-none"><i data-lucide="minus-circle" class="w-2.5 h-2.5"></i> None</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">1</span></td>
+                <td class="text-[12px] text-neutral-600">2 months ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openContact('CT-1798')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">TH</div>
+                    <div class="font-semibold text-[13px]">Tom Hesketh</div>
+                  </div>
+                </td>
+                <td>
+                  <div><span class="pivot-link">Hesketh Estates Pty Ltd</span></div>
+                  <div class="text-[11px] text-neutral-500">Director</div>
+                </td>
+                <td class="text-[12px] text-neutral-700 font-mono">+61 408 224 119</td>
+                <td class="text-[12px] text-neutral-700 truncate">tom@heskethestates.com.au</td>
+                <td><span class="badge badge-portal-none"><i data-lucide="minus-circle" class="w-2.5 h-2.5"></i> None</span></td>
+                <td class="text-right text-[13px] font-semibold text-neutral-500">0</td>
+                <td class="text-[12px] text-neutral-600">8 months ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Email" title="Email"><i data-lucide="mail" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+
+          <div class="px-4 py-3 border-t border-neutral-200 flex items-center justify-between text-[12px] text-neutral-500">
+            <span>Showing 1–9 of 87 clients</span>
+            <div class="flex items-center gap-1">
+              <button class="btn btn-ghost py-1 px-2 text-[12px]" aria-label="Previous page"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
+              <span class="px-2">Page 1 of 10</span>
+              <button class="btn btn-ghost py-1 px-2 text-[12px]" aria-label="Next page"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===============================================
+           TAB 2 — COMPANIES
+           =============================================== -->
+      <section id="tab-companies" class="tab-pane hidden">
+
+        <div class="card mb-4">
+
+          <!-- Row 1: search bar (full width within toolbar card) -->
+          <div class="px-4 pt-3 pb-2">
+            <div class="relative w-full">
+              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"></i>
+              <input type="text" aria-label="Search companies" placeholder="Search companies…"
+                class="w-full pl-8 pr-3 py-1.5 text-[12px] bg-neutral-100 border border-neutral-200 rounded-[6px] placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 focus:bg-white">
+            </div>
+          </div>
+
+          <!-- Row 2: 4 borderless filter columns, equal quarters, captions above dropdowns -->
+          <div class="px-4 pt-1 pb-3 grid grid-cols-4 gap-4">
+
+            <!-- Column 1: Type (dropdown sourced from company_types lookup table) -->
+            <div class="flex flex-col gap-1.5">
+              <label for="filter-company-type" class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Type</label>
+              <!-- WEWEB: bind options to a Supabase collection on company_types
+                   WHERE is_active = true ORDER BY sort_order, display_label.
+                   The "All" item is hard-coded at the top of the list. -->
+              <select id="filter-company-type"
+                class="w-full text-[12px] border border-neutral-300 rounded-[6px] px-2.5 py-1.5 bg-white
+                       focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-500"
+                aria-label="Filter companies by type">
+                <option value="">All types</option>
+                <option value="client">Client</option>
+                <option value="builder">Builder</option>
+                <option value="design">Design</option>
+                <option value="consultancy">Consultancy</option>
+                <option value="authority">Authority</option>
+                <option value="contractor">Contractor</option>
+                <!-- Future entries added via Settings › Company types admin page -->
+              </select>
+            </div>
+
+            <!-- Column 2: Activity -->
+            <div class="flex flex-col gap-1.5">
+              <label for="filter-company-activity" class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Activity</label>
+              <select id="filter-company-activity"
+                class="w-full text-[12px] border border-neutral-300 rounded-[6px] px-2.5 py-1.5 bg-white
+                       focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-500"
+                aria-label="Filter companies by activity"
+                title="Dormant = no project activity in 12 months">
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="dormant">Dormant</option>
+              </select>
+            </div>
+
+            <!-- Column 3: Debtor -->
+            <div class="flex flex-col gap-1.5">
+              <label for="filter-company-debtor" class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Debtor</label>
+              <select id="filter-company-debtor"
+                class="w-full text-[12px] border border-neutral-300 rounded-[6px] px-2.5 py-1.5 bg-white
+                       focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-500"
+                aria-label="Filter companies by debtor status">
+                <option value="">All</option>
+                <option value="debtor">Currently a debtor</option>
+                <option value="not_debtor">Not a debtor</option>
+              </select>
+            </div>
+
+            <!-- Column 4: Status (companies.status enum: active · archived · merged) -->
+            <div class="flex flex-col gap-1.5">
+              <label for="filter-company-status" class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Status</label>
+              <select id="filter-company-status"
+                class="w-full text-[12px] border border-neutral-300 rounded-[6px] px-2.5 py-1.5 bg-white
+                       focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-500"
+                aria-label="Filter companies by status">
+                <option value="active" selected>Active</option>
+                <option value="archived">Archived</option>
+                <option value="merged">Merged</option>
+                <option value="">All</option>
+              </select>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="card overflow-x-auto">
+          <table class="dir-table">
+            <thead>
+              <tr>
+                <th class="w-[300px]">Company</th>
+                <th class="w-[140px]">Type</th>
+                <th class="w-[160px]">ABN</th>
+                <th class="text-right w-[120px]">Contacts</th>
+                <th class="text-right w-[120px]">Projects</th>
+                <th class="text-right w-[120px]">Debtor on</th>
+                <th class="w-[130px]">Last activity</th>
+                <th class="w-[80px]"></th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <tr onclick="openCompany('CO-1042')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">GD</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Glenelg Developments Pty Ltd</div>
+                      <div class="text-[11px] text-neutral-500">Developer · SA</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-client">Client</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">62 144 887 220</td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">2</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">3</span></td>
+                <td class="text-right text-[13px] font-semibold text-success">3</td>
+                <td class="text-[12px] text-neutral-600">Today</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openCompany('CO-2014')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">WA</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Walsh Architects</div>
+                      <div class="text-[11px] text-neutral-500">Architectural practice · SA</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-design">Design</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">88 220 045 911</td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">3</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">8</span></td>
+                <td class="text-right text-[13px] text-neutral-500">0</td>
+                <td class="text-[12px] text-neutral-600">12 May</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openCompany('CO-2087')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">AA</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Apex Acoustics</div>
+                      <div class="text-[11px] text-neutral-500">Acoustic engineering · NSW</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-consultancy">Consultancy</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">14 558 902 113</td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">1</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">2</span></td>
+                <td class="text-right text-[13px] text-neutral-500">0</td>
+                <td class="text-[12px] text-neutral-600">10 May</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openCompany('CO-2153')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">BS</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Berry Structural Engineers</div>
+                      <div class="text-[11px] text-neutral-500">Structural engineering · SA</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-consultancy">Consultancy</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">76 332 008 442</td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">2</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">4</span></td>
+                <td class="text-right text-[13px] text-neutral-500">0</td>
+                <td class="text-[12px] text-neutral-600">9 May</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openCompany('CO-3208')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">CH</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">City of Holdfast Bay</div>
+                      <div class="text-[11px] text-neutral-500">Local council · SA</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-authority">Authority</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">14 005 002 819</td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">1</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">2</span></td>
+                <td class="text-right text-[13px] text-neutral-500">0</td>
+                <td class="text-[12px] text-neutral-600">2 weeks ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openCompany('CO-1112')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">MC</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Macready Constructions Pty Ltd</div>
+                      <div class="text-[11px] text-neutral-500">Head contractor · NT/SA</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-builder">Builder</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">22 770 119 558</td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">4</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">5</span></td>
+                <td class="text-right text-[13px] font-semibold text-success">5</td>
+                <td class="text-[12px] text-neutral-600">2 days ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openCompany('CO-1334')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">CL</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Coastal Living Group Pty Ltd</div>
+                      <div class="text-[11px] text-neutral-500">Developer · SA</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-client">Client</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">98 441 558 002</td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">2</span></td>
+                <td class="text-right text-[13px] font-semibold text-primary-500"><span class="pivot-link">1</span></td>
+                <td class="text-right text-[13px] font-semibold text-success">1</td>
+                <td class="text-[12px] text-neutral-600">1 week ago</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openCompany('CO-4421')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-company">NT</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">NT Building Practitioners Board</div>
+                      <div class="text-[11px] text-neutral-500">Statutory body · NT</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-comp-authority">Authority</span></td>
+                <td class="text-[12px] font-mono text-neutral-700">66 008 991 100</td>
+                <td class="text-right text-[13px] text-neutral-500">0</td>
+                <td class="text-right text-[13px] text-neutral-500">0</td>
+                <td class="text-right text-[13px] text-neutral-500">0</td>
+                <td class="text-[12px] text-neutral-500 italic">—</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+
+          <div class="px-4 py-3 border-t border-neutral-200 flex items-center justify-between text-[12px] text-neutral-500">
+            <span>Showing 1–8 of 52 companies</span>
+            <div class="flex items-center gap-1">
+              <button class="btn btn-ghost py-1 px-2 text-[12px]" aria-label="Previous page"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
+              <span class="px-2">Page 1 of 7</span>
+              <button class="btn btn-ghost py-1 px-2 text-[12px]" aria-label="Next page"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===============================================
+           TAB 3 — STAFF
+           =============================================== -->
+      <section id="tab-staff" class="tab-pane hidden">
+
+        <div class="card mb-4">
+          <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+            <div class="relative flex-1 max-w-sm min-w-[200px]">
+              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"></i>
+              <input type="text" aria-label="Search staff" placeholder="Search staff…"
+                class="w-full pl-8 pr-3 py-1.5 text-[12px] bg-neutral-100 border border-neutral-200 rounded-[6px] placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 focus:bg-white">
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Office</span>
+              <button class="chip chip-active">All</button>
+              <button class="chip">NT</button>
+              <button class="chip">SA</button>
+              <button class="chip">QLD</button>
+              <button class="chip">VIC</button>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Status</span>
+              <button class="chip chip-active">Active</button>
+              <button class="chip">On leave</button>
+              <button class="chip">All</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card overflow-x-auto">
+          <table class="dir-table">
+            <thead>
+              <tr>
+                <th class="w-[260px]">Name &amp; title</th>
+                <th class="w-[130px]">Role</th>
+                <th>Registrations</th>
+                <th class="w-[120px]">Office</th>
+                <th class="w-[200px]">Contact</th>
+                <th class="text-right w-[110px]">Allocations</th>
+                <th class="w-[100px]">Status</th>
+                <th class="w-[80px]"></th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <tr onclick="openStaff('ST-001')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-staff">DC</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Duncan Cooke</div>
+                      <div class="text-[11px] text-neutral-500">Director</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-staff-role-certifier">Certifier</span></td>
+                <td>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="reg-pill">NT 19209BU</span>
+                    <span class="reg-pill">NT 19209ES</span>
+                  </div>
+                </td>
+                <td class="text-[12px] text-neutral-700">SA / NT</td>
+                <td>
+                  <div class="text-[12px] text-neutral-700 truncate">duncan@pbc.au</div>
+                  <div class="text-[11px] text-neutral-500 font-mono">+61 412 008 555</div>
+                </td>
+                <td class="text-right text-[13px] font-semibold text-primary-500">18</td>
+                <td><span class="badge badge-staff-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openStaff('ST-002')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-staff">DD</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">David Duxfield</div>
+                      <div class="text-[11px] text-neutral-500">Operations Manager</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-staff-role-manager">Manager</span></td>
+                <td>
+                  <div class="text-[12px] text-neutral-500 italic">—</div>
+                </td>
+                <td class="text-[12px] text-neutral-700">NT — Darwin</td>
+                <td>
+                  <div class="text-[12px] text-neutral-700 truncate">david@pbc.au</div>
+                  <div class="text-[11px] text-neutral-500 font-mono">+61 419 224 778</div>
+                </td>
+                <td class="text-right text-[13px] font-semibold text-primary-500">12</td>
+                <td><span class="badge badge-staff-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openStaff('ST-003')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-staff">JH</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Jessica Hartley</div>
+                      <div class="text-[11px] text-neutral-500">Senior Building Certifier</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-staff-role-certifier">Certifier</span></td>
+                <td>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="reg-pill">NT 17442BU</span>
+                  </div>
+                </td>
+                <td class="text-[12px] text-neutral-700">NT — Darwin</td>
+                <td>
+                  <div class="text-[12px] text-neutral-700 truncate">jessica@pbc.au</div>
+                  <div class="text-[11px] text-neutral-500 font-mono">+61 408 552 113</div>
+                </td>
+                <td class="text-right text-[13px] font-semibold text-primary-500">14</td>
+                <td><span class="badge badge-staff-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openStaff('ST-004')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-staff">JP</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">James Patel</div>
+                      <div class="text-[11px] text-neutral-500">Senior Inspector</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-staff-role-inspector">Inspector</span></td>
+                <td>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="reg-pill">QLD 88224BC</span>
+                  </div>
+                </td>
+                <td class="text-[12px] text-neutral-700">QLD — Brisbane</td>
+                <td>
+                  <div class="text-[12px] text-neutral-700 truncate">james@pbc.au</div>
+                  <div class="text-[11px] text-neutral-500 font-mono">+61 417 902 008</div>
+                </td>
+                <td class="text-right text-[13px] font-semibold text-primary-500">9</td>
+                <td><span class="badge badge-staff-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openStaff('ST-005')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-staff">RK</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Rachel Knowles</div>
+                      <div class="text-[11px] text-neutral-500">Building Surveyor</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-staff-role-surveyor">Surveyor</span></td>
+                <td>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="reg-pill">VIC BS-U 1142</span>
+                  </div>
+                </td>
+                <td class="text-[12px] text-neutral-700">VIC — Melbourne</td>
+                <td>
+                  <div class="text-[12px] text-neutral-700 truncate">rachel@pbc.au</div>
+                  <div class="text-[11px] text-neutral-500 font-mono">+61 401 552 998</div>
+                </td>
+                <td class="text-right text-[13px] font-semibold text-warning">7</td>
+                <td><span class="badge badge-staff-leave"><i data-lucide="palmtree" class="w-2.5 h-2.5"></i> On leave</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openStaff('ST-006')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar-staff">TB</div>
+                    <div>
+                      <div class="font-semibold text-[13px]">Tom Bartlett</div>
+                      <div class="text-[11px] text-neutral-500">Administration Officer</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge badge-staff-role-admin">Admin</span></td>
+                <td>
+                  <div class="text-[12px] text-neutral-500 italic">—</div>
+                </td>
+                <td class="text-[12px] text-neutral-700">NT — Darwin</td>
+                <td>
+                  <div class="text-[12px] text-neutral-700 truncate">tom@pbc.au</div>
+                  <div class="text-[11px] text-neutral-500 font-mono">+61 408 119 880</div>
+                </td>
+                <td class="text-right text-[13px] font-semibold text-primary-500">4</td>
+                <td><span class="badge badge-staff-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+
+          <div class="px-4 py-3 border-t border-neutral-200 flex items-center justify-between text-[12px] text-neutral-500">
+            <span>Showing all 6 staff</span>
+            <span>Total allocations: 64</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===============================================
+           TAB 4 — ALL PORTAL USERS
+           WEWEB: v-if currentUser.role in ['admin','manager']
+                  (entire tab + its trigger button)
+           =============================================== -->
+      <section id="tab-users" class="tab-pane hidden">
+
+        <div class="card mb-4">
+          <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+            <div class="relative flex-1 max-w-sm min-w-[200px]">
+              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"></i>
+              <input type="text" aria-label="Search portal users" placeholder="Search portal users…"
+                class="w-full pl-8 pr-3 py-1.5 text-[12px] bg-neutral-100 border border-neutral-200 rounded-[6px] placeholder:text-neutral-500 focus:outline-none focus:border-primary-500 focus:bg-white">
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Role</span>
+              <button class="chip chip-active">All</button>
+              <button class="chip">Admin</button>
+              <button class="chip">Manager</button>
+              <button class="chip">Staff</button>
+              <button class="chip">Client</button>
+              <button class="chip">Consultant</button>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] uppercase tracking-wider text-neutral-500 font-semibold">Status</span>
+              <button class="chip chip-active">All</button>
+              <button class="chip">Active</button>
+              <button class="chip">Invited</button>
+              <button class="chip">Disabled</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card overflow-x-auto">
+          <table class="dir-table">
+            <thead>
+              <tr>
+                <th class="w-[240px]">User</th>
+                <th class="w-[110px]">Role</th>
+                <th class="w-[200px]">Linked to</th>
+                <th>Email</th>
+                <th class="w-[110px]">Status</th>
+                <th class="w-[120px]">Last sign-in</th>
+                <th class="w-[80px]">MFA</th>
+                <th class="w-[80px]"></th>
+              </tr>
+            </thead>
+            <tbody>
+
+              <tr onclick="openUser('US-0001')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">DC</div>
+                    <div class="font-semibold text-[13px]">Duncan Cooke</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-admin">Admin</span></td>
+                <td><span class="link-small" onclick="event.stopPropagation();"><i data-lucide="user-cog" class="w-2.5 h-2.5"></i> Staff: Duncan Cooke</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">duncan@pbc.au</td>
+                <td><span class="badge badge-user-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-[12px] text-neutral-600">Just now</td>
+                <td><span class="mfa-on">On</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openUser('US-0002')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">DD</div>
+                    <div class="font-semibold text-[13px]">David Duxfield</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-manager">Manager</span></td>
+                <td><span class="link-small"><i data-lucide="user-cog" class="w-2.5 h-2.5"></i> Staff: David Duxfield</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">david@pbc.au</td>
+                <td><span class="badge badge-user-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-[12px] text-neutral-600">2 hours ago</td>
+                <td><span class="mfa-on">On</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openUser('US-0003')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">JH</div>
+                    <div class="font-semibold text-[13px]">Jessica Hartley</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-manager">Manager</span></td>
+                <td><span class="link-small"><i data-lucide="user-cog" class="w-2.5 h-2.5"></i> Staff: Jessica Hartley</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">jessica@pbc.au</td>
+                <td><span class="badge badge-user-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-[12px] text-neutral-600">Yesterday</td>
+                <td><span class="mfa-on">On</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openUser('US-0114')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">MG</div>
+                    <div class="font-semibold text-[13px]">Mark Glenister</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-client">Client</span></td>
+                <td><span class="link-small"><i data-lucide="user" class="w-2.5 h-2.5"></i> Contact: Mark Glenister</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">mark@glenelgdev.com.au</td>
+                <td><span class="badge badge-user-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-[12px] text-neutral-600">Today</td>
+                <td><span class="mfa-off">Off</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openUser('US-0118')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">SP</div>
+                    <div class="font-semibold text-[13px]">Sarah Pham</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-client">Client</span></td>
+                <td><span class="link-small"><i data-lucide="user" class="w-2.5 h-2.5"></i> Contact: Sarah Pham</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">sarah.pham@glenelgdev.com.au</td>
+                <td><span class="badge badge-user-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-[12px] text-neutral-600">Yesterday</td>
+                <td><span class="mfa-on">On</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openUser('US-0202')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">EM</div>
+                    <div class="font-semibold text-[13px]">Eve Martinez</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-consultant">Consultant</span></td>
+                <td><span class="link-small"><i data-lucide="user" class="w-2.5 h-2.5"></i> Contact: Eve Martinez</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">eve@apexacoustics.com.au</td>
+                <td><span class="badge badge-user-invited"><i data-lucide="mail" class="w-2.5 h-2.5"></i> Invited</span></td>
+                <td class="text-[12px] text-neutral-500 italic">Never</td>
+                <td><span class="mfa-none">—</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Re-send invite" title="Re-send invite"><i data-lucide="send" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openUser('US-0285')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">LM</div>
+                    <div class="font-semibold text-[13px]">Lisa Macready</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-client">Client</span></td>
+                <td><span class="link-small"><i data-lucide="user" class="w-2.5 h-2.5"></i> Contact: Lisa Macready</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">lisa@macreadyconst.com.au</td>
+                <td><span class="badge badge-user-active"><i data-lucide="check-circle" class="w-2.5 h-2.5"></i> Active</span></td>
+                <td class="text-[12px] text-neutral-600">Today</td>
+                <td><span class="mfa-on">On</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr onclick="openUser('US-0006')">
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="ent-avatar">TB</div>
+                    <div class="font-semibold text-[13px]">Tom Bartlett</div>
+                  </div>
+                </td>
+                <td><span class="badge badge-role-staff">Staff</span></td>
+                <td><span class="link-small"><i data-lucide="user-cog" class="w-2.5 h-2.5"></i> Staff: Tom Bartlett</span></td>
+                <td class="text-[12px] text-neutral-700 truncate">tom@pbc.au</td>
+                <td><span class="badge badge-user-suspended"><i data-lucide="lock" class="w-2.5 h-2.5"></i> Suspended</span></td>
+                <td class="text-[12px] text-neutral-600">14 days ago</td>
+                <td><span class="mfa-on">On</span></td>
+                <td onclick="event.stopPropagation()">
+                  <div class="flex items-center gap-1 justify-end">
+                    <button class="icon-btn" aria-label="Reactivate" title="Reactivate"><i data-lucide="unlock" class="w-3.5 h-3.5"></i></button>
+                    <button class="icon-btn" aria-label="More" title="More"><i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                </td>
+              </tr>
+
+            </tbody>
+          </table>
+
+          <div class="px-4 py-3 border-t border-neutral-200 flex items-center justify-between text-[12px] text-neutral-500">
+            <span>Showing 1–8 of 94 portal users</span>
+            <div class="flex items-center gap-1">
+              <button class="btn btn-ghost py-1 px-2 text-[12px]" aria-label="Previous page"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
+              <span class="px-2">Page 1 of 12</span>
+              <button class="btn btn-ghost py-1 px-2 text-[12px]" aria-label="Next page"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (window.lucide) lucide.createIcons();
+  });
+
+  function switchTab(el, tab, addLabel, addIcon) {
+    document.querySelectorAll('.ptab-link').forEach(t => t.classList.remove('ptab-link-active'));
+    el.classList.add('ptab-link-active');
+
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+    document.getElementById('tab-' + tab).classList.remove('hidden');
+
+    document.getElementById('primary-add-label').textContent = addLabel;
+    const btn = document.getElementById('primary-add-btn');
+    const icon = btn.querySelector('[data-lucide]');
+    if (icon) icon.setAttribute('data-lucide', addIcon);
+    if (window.lucide) lucide.createIcons();
+
+    // WEWEB: also toggle btn visibility per tab role-gate:
+    //   clients     → role in ['admin','manager']
+    //   companies   → role in ['admin','manager']
+    //   staff       → role = 'admin' only
+    //   users       → role in ['admin','manager']
+  }
+
+  function openContact(id) { console.log('Open contact:', id); }
+  function openCompany(id) { console.log('Open company:', id); }
+  function openStaff(id)   { console.log('Open staff:', id); }
+  function openUser(id)    { console.log('Open user:', id); }
+  function pivotToCompany(id) {
+    document.querySelector('[data-tab="companies"]').click();
+    console.log('Filter companies to:', id);
+  }
+
+  // ======================================================
+  // EXPORT (Admin only — see v-if on wrapper)
+  //
+  // WEWEB: replace stub with a workflow that:
+  //   1. Reads the active tab id (data-tab on .ptab-link-active)
+  //   2. Reads current filter chip + search input state
+  //   3. Calls the matching Supabase RPC:
+  //        export_clients(filter_json, format)
+  //        export_companies(filter_json, format)
+  //        export_staff(filter_json, format)
+  //        export_portal_users(filter_json, format)
+  //   4. RPC returns a signed download URL (xlsx generated server-side
+  //      so ABN leading zeros and dates survive). CSV is generated
+  //      from the same query result set.
+  //   5. Trigger browser download of the signed URL.
+  //
+  // WEWEB: also log the export event to an audit table —
+  //   user_id, tab, filter_json, format, row_count, timestamp.
+  //   Required because exports are a data-exfiltration risk.
+  // ======================================================
+  function exportCurrentTab(format) {
+    const activeTab = document.querySelector('.ptab-link-active')?.dataset.tab || 'clients';
+    console.log('Export:', activeTab, 'as', format);
+    closeExportMenu();
+  }
+
+  function toggleExportMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('export-menu');
+    const btn = document.getElementById('export-menu-btn');
+    const isOpen = !menu.classList.contains('hidden');
+    if (isOpen) {
+      menu.classList.add('hidden');
+      btn.setAttribute('aria-expanded', 'false');
+    } else {
+      menu.classList.remove('hidden');
+      btn.setAttribute('aria-expanded', 'true');
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+
+  function closeExportMenu() {
+    const menu = document.getElementById('export-menu');
+    const btn = document.getElementById('export-menu-btn');
+    if (menu) menu.classList.add('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
+  // Close menu on outside click or Escape
+  document.addEventListener('click', (e) => {
+    const wrapper = document.getElementById('export-wrapper');
+    if (wrapper && !wrapper.contains(e.target)) closeExportMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeExportMenu();
+  });
+</script>
+
+</body>
+</html>
 

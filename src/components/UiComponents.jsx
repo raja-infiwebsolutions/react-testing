@@ -1,15 +1,14 @@
 import React from 'react';
+import '../styles/global.css';
+import { assets } from '../assets/index.js';
 
 export function Header() {
   return (
     <header className="bg-white border-b">
       <div className="container mx-auto p-4 md:p-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded bg-indigo-600 flex items-center justify-center text-white font-bold">IC</div>
-          <div>
-            <div className="text-sm text-gray-500">iCertify</div>
-            <div className="text-xs text-gray-400">Contacts</div>
-          </div>
+          <img src={assets.logo} alt="Logo" className="h-8 w-auto" />
+          <h1 className="text-lg font-semibold">iCertify</h1>
         </div>
         <nav className="hidden md:flex items-center gap-4 text-sm text-gray-600">
           <a href="#" className="hover:text-gray-900">Dashboard</a>
@@ -23,102 +22,111 @@ export function Header() {
 
 export function SearchBar() {
   return (
-    <div className="flex items-center gap-2">
-      <label htmlFor="q" className="sr-only">Search</label>
-      <div className="relative">
-        <input id="q" name="q" className="border bg-gray-50 text-sm rounded-md pl-9 pr-3 py-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-200" placeholder="Search contacts" />
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"><i data-lucide="search"></i></span>
+    <div className="container mx-auto p-4 md:p-6">
+      <div className="flex items-center gap-3">
+        <input
+          id="search"
+          className="flex-1 border rounded px-3 py-2 shadow-sm"
+          placeholder="Search contacts or companies..."
+          aria-label="Search contacts"
+        />
+        <button className="px-4 py-2 bg-blue-600 text-white rounded">Search</button>
       </div>
-      <button className="btn btn--primary text-sm bg-indigo-600 text-white px-3 py-2 rounded-md">New</button>
     </div>
   );
 }
 
 export function Tabs() {
   return (
-    <div className="mb-4">
-      <div className="flex gap-2 text-sm">
-        <button className="px-3 py-2 rounded-md bg-indigo-50 text-indigo-700">All</button>
-        <button className="px-3 py-2 rounded-md hover:bg-gray-100">Customers</button>
-        <button className="px-3 py-2 rounded-md hover:bg-gray-100">Vendors</button>
+    <div className="container mx-auto p-4 md:p-6">
+      <div className="flex gap-3 text-sm">
+        <button className="px-3 py-2 rounded bg-gray-100">All</button>
+        <button className="px-3 py-2 rounded">Customers</button>
+        <button className="px-3 py-2 rounded">Suppliers</button>
       </div>
     </div>
   );
 }
 
-const sample = [
-  { id: '1', name: 'Alice Johnson', email: 'alice@example.com', phone: '+1 555-1234', company: 'Acme Corp' },
-  { id: '2', name: 'Bob Smith', email: 'bob@example.com', phone: '+1 555-5678', company: 'Widget Co' },
-  { id: '3', name: 'Eve Adams', email: 'eve@example.com', phone: '+1 555-9012', company: 'Tech LLC' },
-];
+export function ContactTable({ data = null }) {
+  const rows = data || [
+    { id: 1, name: 'Jane Doe', email: 'jane@example.com', company: 'Acme Inc.' },
+    { id: 2, name: 'John Smith', email: 'john@example.com', company: 'Widgets Co.' },
+  ];
 
-export function ContactTable() {
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-left">
-        <thead>
-          <tr className="text-sm text-gray-500 border-b">
-            <th className="p-3">Name</th>
-            <th className="p-3">Email</th>
-            <th className="p-3">Phone</th>
-            <th className="p-3">Company</th>
-            <th className="p-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sample.map((c) => (
-            <tr key={c.id} className="even:bg-gray-50">
-              <td className="p-3 align-top">
-                <div className="font-medium">{c.name}</div>
-                <div className="text-xs text-gray-500">Member since 2021</div>
-              </td>
-              <td className="p-3 align-top">{c.email}</td>
-              <td className="p-3 align-top">{c.phone}</td>
-              <td className="p-3 align-top">{c.company}</td>
-              <td className="p-3 align-top">
-                <div className="flex gap-2">
-                  <button className="text-sm text-indigo-600 hover:underline">Edit</button>
-                  <button className="text-sm text-red-600 hover:underline">Delete</button>
-                </div>
-              </td>
+    <div className="container mx-auto p-4 md:p-6">
+      <div className="bg-white border rounded shadow-sm overflow-auto">
+        <table className="w-full table-auto">
+          <thead className="bg-gray-50 text-left text-xs text-gray-500">
+            <tr>
+              <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Email</th>
+              <th className="px-4 py-3">Company</th>
+              <th className="px-4 py-3">Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-t">
+                <td className="px-4 py-3 flex items-center gap-3">
+                  <img src={assets.avatar} alt="avatar" className="h-8 w-8 rounded-full" />
+                  <div>
+                    <div className="font-medium">{r.name}</div>
+                    <div className="text-xs text-gray-500">Member since 2021</div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700">{r.email}</td>
+                <td className="px-4 py-3 text-sm text-gray-700">{r.company}</td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-2">
+                    <button className="text-sm px-2 py-1 border rounded">Edit</button>
+                    <button className="text-sm px-2 py-1 border rounded text-red-600">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
 export function ContactForm() {
+  function onSubmit(e) {
+    e.preventDefault();
+    // No-op for static demo
+    alert('Form submitted (demo)');
+  }
+
   return (
-    <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
-      <div>
-        <label htmlFor="name" className="block text-sm font-medium text-gray-700">Name</label>
-        <input id="name" name="name" className="mt-1 block w-full rounded-md border-gray-200 bg-gray-50 text-sm p-2" />
-      </div>
-
-      <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
-        <input id="email" name="email" type="email" className="mt-1 block w-full rounded-md border-gray-200 bg-gray-50 text-sm p-2" />
-      </div>
-
-      <div>
-        <label htmlFor="phone" className="block text-sm font-medium text-gray-700">Phone</label>
-        <input id="phone" name="phone" className="mt-1 block w-full rounded-md border-gray-200 bg-gray-50 text-sm p-2" />
-      </div>
-
-      <div className="flex gap-2">
-        <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-md text-sm">Save</button>
-        <button type="button" className="flex-1 border border-gray-200 py-2 rounded-md text-sm">Cancel</button>
-      </div>
-    </form>
+    <div className="container mx-auto p-4 md:p-6">
+      <form onSubmit={onSubmit} className="bg-white border rounded p-4 grid gap-3 md:grid-cols-2">
+        <div className="md:col-span-1">
+          <label htmlFor="name" className="block text-sm font-medium mb-1">Name</label>
+          <input id="name" className="w-full border rounded px-3 py-2" required />
+        </div>
+        <div className="md:col-span-1">
+          <label htmlFor="email" className="block text-sm font-medium mb-1">Email</label>
+          <input id="email" type="email" className="w-full border rounded px-3 py-2" required />
+        </div>
+        <div className="md:col-span-2">
+          <label htmlFor="message" className="block text-sm font-medium mb-1">Message</label>
+          <textarea id="message" rows="4" className="w-full border rounded px-3 py-2"></textarea>
+        </div>
+        <div className="md:col-span-2 flex justify-end">
+          <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded">Send</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
 export function Footer() {
   return (
-    <footer className="bg-white border-t mt-8">
-      <div className="container mx-auto p-4 text-sm text-gray-500 text-center">© {new Date().getFullYear()} iCertify — Migrated contact page</div>
+    <footer className="mt-8 border-t bg-white">
+      <div className="container mx-auto p-4 text-sm text-gray-500">© {new Date().getFullYear()} iCertify — All rights reserved.</div>
     </footer>
   );
 }

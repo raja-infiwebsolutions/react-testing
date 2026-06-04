@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contacts · iCertify (React)</title>
+
+  <!-- Favicon (if available in assets) -->
+  <link rel="icon" href="./src/assets/favicon.ico">
+
+  <!-- Google Fonts (reuse from original) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Tailwind via CDN (page used Tailwind utilities via CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+  <!-- Lucide icons (used by original page) -->
+  <script src="https://unpkg.com/lucide@0.244.0/dist/lucide.min.js"></script>
+
+  <meta name="description" content="Migrated Contacts page" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="module" src="/src/main.jsx"></script>
+  <script>
+    // Initialize lucide icons after hydration
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.lucide) window.lucide.replace();
+    });
+  </script>
+</body>
+</html>
